@@ -211,63 +211,66 @@ ngx_http_ip2region_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
 {
     ngx_http_ip2region_conf_t  *ip2region_conf;
-    struct sockaddr_in         *sin;
     char                        region[512] = {'\0'};
     int                         err;
     unsigned int                ip;
-
-#if (NGX_HAVE_INET6)
-    u_char                      *p;
-    in_addr_t                    addr;
-    struct sockaddr_in6         *sin6;
-#endif
+    u_char                     *xff;
+    u_char                     *p;
+    struct sockaddr_in         *sin;
+    struct sockaddr_in6        *sin6;
 
     ip2region_conf = ngx_http_get_module_main_conf(r, ngx_http_ip2region_module);
 
     if (ip2region_conf->ip2region_searcher != NULL) {
+        xff = ngx_table_get(r->headers_in, "X-Forwarded-For");
 
-        switch (r->connection->sockaddr->sa_family) {
-            case AF_INET:
-                sin = (struct sockaddr_in *) r->connection->sockaddr;
-                ip = htonl(sin->sin_addr.s_addr);
-                err = xdb_search(&ip2region_conf->ip2region_searcher->searcher, ip, region, sizeof(region));
-                if (err == 0) {
-                    v->data = (unsigned char *)region;
-                    v->len = strlen(region);
-                    return NGX_OK;
-                }
-                break;
+        if (xff != NULL) {
+            p = ngx_strchr(xff, ',');
 
-#if (NGX_HAVE_INET6)
+            if (p != NULL) {
+                *p = '\0';
+            }
 
-            case AF_INET6:
-                sin6 = (struct sockaddr_in6 *) r->connection->sockaddr;
-                p = sin6->sin6_addr.s6_addr;
+            ip = inet_addr((const char *)xff);
+        } else {
+            switch (r->connection->sockaddr->sa_family) {
+                case AF_INET:
+                    sin = (struct sockaddr_in *) r->connection->sockaddr;
+                    ip = ntohl(sin->sin_addr.s_addr);
+                    break;
 
-                if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
-                    addr = p[12] << 24;
-                    addr += p[13] << 16;
-                    addr += p[14] << 8;
-                    addr += p[15];
+                #if (NGX_HAVE_INET6)
+                case AF_INET6:
+                    sin6 = (struct sockaddr_in6 *) r->connection->sockaddr;
+                    p = sin6->sin6_addr.s6_addr;
 
-                    ip = htonl(addr);
-                    err = xdb_search(&ip2region_conf->ip2region_searcher->searcher, ip, region, sizeof(region));
-                    if (err == 0) {
-                        v->data = (unsigned char *)region;
-                        v->len = strlen(region);
-                        return NGX_OK;
+                    if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
+                        ip = (p[12] << 24) | (p[13] << 16) | (p[14] << 8) | p[15];
+                    } else {
+                        ip = 0; // Handle non-IPv4-mapped IPv6 address appropriately
                     }
-                }
-                break;
+                    break;
+                #endif
+                default:
+                    ip = 0;
+                    break;
+            }
+        }
 
-#endif
-
+        if (ip != 0) {
+            err = xdb_search(&ip2region_conf->ip2region_searcher->searcher, ip, region, sizeof(region));
+            if (err == 0) {
+                v->data = (unsigned char *)region;
+                v->len = strlen(region);
+                return NGX_OK;
+            }
         }
     }
 
     v->not_found = 1;
     return NGX_OK;
 }
+
 
 
 static void
