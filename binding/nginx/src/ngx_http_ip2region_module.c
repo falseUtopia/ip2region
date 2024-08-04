@@ -222,7 +222,7 @@ ngx_http_ip2region_variable(ngx_http_request_t *r,
     ip2region_conf = ngx_http_get_module_main_conf(r, ngx_http_ip2region_module);
 
     if (ip2region_conf->ip2region_searcher != NULL) {
-        xff = ngx_table_get(r->headers_in, "X-Forwarded-For");
+        xff = ngx_str_t(r->headers_in, "X-Forwarded-For");
 
         if (xff != NULL) {
             p = ngx_strchr(xff, ',');
